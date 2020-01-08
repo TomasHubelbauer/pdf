@@ -28,5 +28,3 @@ can be used to visualize the internal structure and cross-reference it with my c
 ### Rewrite in Node / complement by a Node version later on
 
 For now using the browser for `ArrayBuffer` and `DataView`.
-
-### Get help figuring out why UZIP crashes on decoding the FlateDecode streams

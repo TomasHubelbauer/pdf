@@ -117,6 +117,7 @@ window.addEventListener('load', async () => {
 
     const attributes = parseDictionary();
 
+    let stream;
     if (peek(8) === ' stream\n') {
       shift(8);
 
@@ -128,13 +129,10 @@ window.addEventListener('load', async () => {
       const length = Number(attributes['Length']);
       const filter = attributes['Filter'];
       if (filter === '/FlateDecode') {
-        try {
-          console.log(UZIP.inflateRaw(new Uint8Array(arrayBuffer.slice(cursor, cursor + length))));
-        }
-        // TODO: Get help figuring out why this crashes
-        catch (error) {
-          console.log(error.message);
-        }
+        stream = UZIP.inflate(new Uint8Array(arrayBuffer.slice(cursor, cursor + length)));
+      }
+      else {
+        throw new Error('Found a stream with unsupported encoding: ' + filter);
       }
 
       shift(length);
@@ -156,7 +154,7 @@ window.addEventListener('load', async () => {
       throw new Error(`The object attributes were not followed by the 'endobj\\n' constant.`);
     }
 
-    objects.push({ number, generation, attributes });
+    objects.push({ number, generation, attributes, stream });
   }
 
   if (peek(5) !== 'xref\n') {
@@ -219,4 +217,35 @@ window.addEventListener('load', async () => {
 
   const pdf = { header, version, objects, xrefNumber, xrefGeneration, xrefs, trailerDict, startXref };
   console.dir(pdf);
+
+  for (const object of pdf.objects) {
+    if (!object.stream) {
+      continue;
+    }
+
+    if (object.attributes['Subtype'] !== '/Image') {
+      continue;
+    }
+
+    const width = Number(object.attributes['Width']);
+    const height = Number(object.attributes['Height']);
+    if (width * height * 3 !== object.stream.byteLength) {
+      throw new Error('Stream does not appear to be a raw RGB array.');
+    }
+
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    for (let x = 0; x < width; x++) {
+      for (let y = 0; y < height; y++) {
+        const offset = y * width * 3 + x * 3;
+        const r = object.stream[offset];
+        const g = object.stream[offset + 1];
+        const b = object.stream[offset + 2];
+        context.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        context.fillRect(x, y, 1, 1);
+      }
+    }
+
+    document.body.append(canvas);
+  }
 });
