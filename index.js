@@ -246,6 +246,8 @@ window.addEventListener('load', async () => {
       }
     }
 
-    document.body.append(canvas);
+    const img = document.createElement('img');
+    img.src = canvas.toDataURL();
+    document.body.append(img);
   }
 });
