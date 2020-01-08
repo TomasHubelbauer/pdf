@@ -5,42 +5,67 @@ window.addEventListener('load', () => {
   const contentDiv = document.getElementById('contentDiv');
 
   function renderPdf(/** @type {Pdf} */ pdf) {
-    contentDiv.innerHTML = '';
-
     console.dir(pdf);
 
+    contentDiv.innerHTML = '';
+
+    const objectSelect = document.createElement('select');
+    objectSelect.size = 10;
+
     for (const object of pdf.objects) {
-      if (!object.stream) {
-        continue;
-      }
+      const objectOption = document.createElement('option');
+      objectOption.value = object.number;
+      objectOption.textContent = object.stream ? `${object.number} (has ${object.content['Filter'] || 'unknown'} ${object.content['Subtype'] || 'binary'} stream)` : object.number;
+      objectSelect.append(objectOption);
+    }
 
-      if (object.attributes['Subtype'] !== '/Image') {
-        continue;
-      }
+    contentDiv.append(objectSelect);
 
-      const width = Number(object.attributes['Width']);
-      const height = Number(object.attributes['Height']);
-      if (width * height * 3 !== object.stream.byteLength) {
-        throw new Error('Stream does not appear to be a raw RGB array.');
-      }
+    const objectPre = document.createElement('pre');
+    contentDiv.append(objectPre);
 
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      for (let x = 0; x < width; x++) {
-        for (let y = 0; y < height; y++) {
-          const offset = y * width * 3 + x * 3;
-          const r = object.stream[offset];
-          const g = object.stream[offset + 1];
-          const b = object.stream[offset + 2];
-          context.fillStyle = `rgb(${r}, ${g}, ${b})`;
-          context.fillRect(x, y, 1, 1);
+    const streamPre = document.createElement('pre');
+    contentDiv.append(streamPre);
+
+    const renderImg = document.createElement('img');
+    contentDiv.append(renderImg);
+
+    objectSelect.addEventListener('change', () => {
+      const object = pdf.objects.find(o => o.number === objectSelect.value);
+      objectPre.textContent = JSON.stringify(object, null, 2);
+      if (typeof object.content === 'object' && object.stream) {
+        streamPre.textContent = new Uint8Array(object.stream.data.slice(0, 10)).toLocaleString() + '...';
+        if (object.content['Filter'] === '/FlateDecode' && object.content['Subtype'] === '/Image') {
+          const width = Number(object.content['Width']);
+          const height = Number(object.content['Height']);
+          const uint8Array = UZIP.inflate(new Uint8Array(object.stream.data));
+          if (width * height * 3 === uint8Array.byteLength) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            for (let x = 0; x < width; x++) {
+              for (let y = 0; y < height; y++) {
+                const offset = y * width * 3 + x * 3;
+                const r = uint8Array[offset];
+                const g = uint8Array[offset + 1];
+                const b = uint8Array[offset + 2];
+                context.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                context.fillRect(x, y, 1, 1);
+              }
+            }
+
+            renderImg.title = '';
+            renderImg.src = canvas.toDataURL();
+          }
+          else {
+            renderImg.title = 'Stream does not appear to be a raw RGB array.';
+            renderImg.src = '';
+          }
         }
       }
-
-      const img = document.createElement('img');
-      img.src = canvas.toDataURL();
-      contentDiv.append(img);
-    }
+      else {
+        streamPre.textContent = '';
+      }
+    });
   }
 
   uploadButton.addEventListener('click', () => {
@@ -57,9 +82,10 @@ window.addEventListener('load', () => {
       return;
     }
 
+    const file = event.currentTarget.files[0];
     const fileReader = new FileReader();
-    fileReader.readAsArrayBuffer(event.currentTarget.files[0]);
-    fileReader.addEventListener('load', () => renderPdf(new Pdf(fileReader.result)));
+    fileReader.readAsArrayBuffer(file);
+    fileReader.addEventListener('load', () => renderPdf(new Pdf(fileReader.result, file.name)));
     fileReader.addEventListener('error', () => alert('Failed to load the file.'));
   });
 
@@ -68,10 +94,20 @@ window.addEventListener('load', () => {
     const arrayBuffer = await response.arrayBuffer();
     renderPdf(new Pdf(arrayBuffer));
   });
+
+  // Load a file if it is prefilled by the browser from the last session
+  if (fileInput.value) {
+    fileInput.dispatchEvent(new Event('change'));
+  }
+  else {
+    demoButton.click();
+  }
 });
 
 class Pdf {
-  constructor(/** @type {ArrayBuffer} */ arrayBuffer) {
+  constructor(/** @type {ArrayBuffer} */ arrayBuffer, /** @type {string} */ name) {
+    this.name = name;
+
     const textDecoder = new TextDecoder();
 
     let cursor = 0;
@@ -99,7 +135,10 @@ class Pdf {
       throw new Error(`The PDF is version ${version}, only 7 is supported at the moment.`);
     }
 
-    if (pop() !== '\n') {
+    if (peek() === '\n' || peek() == '\r') {
+      shift();
+    }
+    else {
       throw new Error('The header does not end with a newline.');
     }
 
@@ -107,59 +146,154 @@ class Pdf {
 
     // Read the recommended comment marking the file as binary if present
     if (peek() === '%') {
+      let newline;
       do {
         // Ignore the comment bytes
       }
-      while (pop() !== '\n');
+      while ((newline = peek(), pop(), newline !== '\r' && newline !== '\n'));
+    }
+
+    function consumeWhitespace() {
+      let consumed = '';
+      let peeked = '';
+      while ((peeked = peek(), peeked === ' ' || peeked === '\r' || peeked === '\n')) {
+        consumed += peeked;
+        shift();
+      }
+
+      return consumed;
+    }
+
+    function expectLiteral(literal) {
+      const peeked = peek(literal.length);
+      if (peeked !== literal) {
+        throw new Error(`Expected literal '${literal}' not found! '${peeked}'`);
+      }
+
+      shift(literal.length);
+    }
+
+    function expectNewline() {
+      if (peek() === '\r') {
+        shift();
+        if (peek() === '\n') {
+          shift();
+        }
+
+        return;
+      }
+
+      if (peek() === '\n') {
+        shift();
+        return;
+      }
+
+      throw new Error(`Expected newline not found! '${peeked}'`);
+    }
+
+    function consumeMatch(regex) {
+      let consumed = '';
+      let peeked;
+      while (regex.exec(peeked = peek())) {
+        consumed += peeked;
+        shift();
+      }
+
+      return consumed;
+    }
+
+    function consumePrior(literal) {
+      let comsumed = '';
+      while (peek(literal.length) !== literal) {
+        comsumed += pop();
+      }
+
+      shift(literal.length);
+      return comsumed;
+    }
+
+    function follows(literal) {
+      const peeked = peek(literal.length);
+      if (peeked === literal) {
+        shift(literal.length);
+        return true;
+      }
+
+      return false;
+    }
+
+    function parseValue() {
+      if (peek(2) === '<<') {
+        return parseDictionary();
+      }
+
+      if (peek() === '[') {
+        return parseArray();
+      }
+
+      let value = '';
+      do {
+        let peeked = peek();
+        while ((peeked = peek(), peeked !== ' ' && peeked !== '\r' && peeked !== '\n') && peek(2) !== '>>') {
+          value += pop();
+        }
+
+        const whitespace = consumeWhitespace();
+        if (peek(2) === '>>' || peek() === '/' || peek(2) === '<<' || peek(2) === '[') {
+          break;
+        }
+        else {
+          value += whitespace;
+        }
+      }
+      while (true);
+
+      return value;
+    }
+
+    function parseArray() {
+      expectLiteral('[');
+      let depth = 1;
+      let value = '';
+      do {
+        const popped = pop();
+        switch (popped) {
+          case '[': {
+            depth++;
+            continue;
+          }
+          case ']': {
+            depth--;
+            continue;
+          }
+        }
+
+        value += popped;
+      }
+      while (depth);
+
+      return value.split(' ');
     }
 
     function parseDictionary() {
-      if (peek(2) !== '<<') {
-        throw new Error('Dictionary opening expected but not found!');
-      }
-
-      pop(2);
+      expectLiteral('<<');
 
       const dict = {};
+      let key;
       while (true) {
-        if (peek() !== '/') {
-          throw new Error('Dictionary key opening expected but not found!');
-        }
-
-        // Pop the key slash
-        pop();
-
-        let key = '';
-        while (peek() !== ' ') {
-          key += pop();
-        }
-
-        // Pop the space after key
-        pop();
-
-        let peeked;
-        if (peek(2) === '<<') {
-          dict[key] = parseDictionary();
-          peeked = peek(2);
-        }
-        else {
-          let value = '';
-
-          while ((peeked = peek(2)) !== '\n/' && peeked !== '>>') {
-            value += pop();
+        consumeWhitespace();
+        if (!key) {
+          if (follows('>>')) {
+            break;
           }
 
-          dict[key] = value;
+          expectLiteral('/');
+          key = consumeMatch(/\w/);
         }
-
-        // Pop the closing and end the dictionary
-        if (peeked === '>>') {
-          pop(2);
-          break;
+        else {
+          dict[key] = parseValue();
+          key = undefined;
         }
-
-        // Pop the newline after value
-        pop();
       }
 
       return dict;
@@ -167,128 +301,72 @@ class Pdf {
 
     this.objects = [];
     while (peek(4) !== 'xref') {
-      let number = '';
-      while (peek() !== ' ') {
-        number += pop();
-      }
+      const object = {};
+      object.number = consumePrior(' ');
+      object.generation = consumePrior(' ');
+      expectLiteral('obj');
+      expectNewline();
+      object.content = parseValue();
+      consumeWhitespace();
 
-      // Pop the space after number
-      shift();
+      if (peek(6) === 'stream') {
+        object.stream = {};
 
-      let generation = '';
-      while (peek() !== ' ') {
-        generation += pop();
-      }
+        shift(6);
+        expectNewline();
 
-      // Pop the space after generation
-      shift();
+        if (typeof object.content !== 'object') {
+          throw new Error('Object has stream but its content is not a dictionary');
+        }
 
-      if (pop(4) !== 'obj\n') {
-        throw new Error(`The object number and generation was not followed by the 'obj\\n' constant.`);
-      }
-
-      const attributes = parseDictionary();
-
-      let stream;
-      if (peek(8) === ' stream\n') {
-        shift(8);
-
-        const attribute = attributes['Length'];
-        if (!attribute) {
+        const length = Number(object.content['Length']);
+        if (!length) {
           throw new Error('Stream with no length attribute encountered!');
         }
 
-        const length = Number(attributes['Length']);
-        const filter = attributes['Filter'];
-        if (filter === '/FlateDecode') {
-          stream = UZIP.inflate(new Uint8Array(arrayBuffer.slice(cursor, cursor + length)));
-        }
-        else {
-          throw new Error('Found a stream with unsupported encoding: ' + filter);
-        }
+        object.stream.data = arrayBuffer.slice(cursor, cursor + length);
 
         shift(length);
-
-        if (pop(11) !== '\nendstream\n') {
-          throw new Error(`The stream was not followed by the '\\nendstream\\n' constant.`);
-        }
-      }
-      else {
-        if (peek() !== '\n') {
-          throw new Error('Object attributes were not followed by a newline!');
-        }
-
-        // Pop the newline after object attributes
-        shift();
+        expectNewline();
+        expectLiteral('endstream');
+        expectNewline();
       }
 
-      if (pop(7) !== 'endobj\n') {
-        throw new Error(`The object attributes were not followed by the 'endobj\\n' constant.`);
-      }
+      expectLiteral('endobj');
+      expectNewline();
 
-      this.objects.push({ number, generation, attributes, stream });
+      this.objects.push(object);
     }
 
-    if (peek(5) !== 'xref\n') {
-      throw new Error('XRef segment not found.');
-    }
-
-    shift(5);
-
-    let xrefNumber = '';
-    while (peek() !== ' ') {
-      xrefNumber += pop();
-    }
-
-    // Pop the space after number
-    shift();
-
-    this.xrefNumber = xrefNumber;
-
-    let xrefGeneration = '';
-    while (peek() !== '\n') {
-      xrefGeneration += pop();
-    }
-
-    // Pop the newline after generation
-    shift();
-
-    this.xrefGeneration = xrefGeneration;
+    expectLiteral('xref');
+    expectNewline();
+    this.xrefNumber = consumePrior(' ');
+    this.xrefGeneration = consumeMatch(/\d/);
+    expectNewline();
 
     this.xrefs = [];
     let match;
     // TODO: Use named groups when supported by Firefox
-    while (match = /^(\d{10}) (\d{5}) ([fn]) \n$/g.exec(peek(20))) {
+    while (match = /^(\d{10}) (\d{5}) ([fn])$/g.exec(peek(18))) {
       shift(20);
       const [_, todo1, todo2, todo3] = match;
 
       // TODO: Parse the right fields for the xrefs
       this.xrefs.push({ todo1, todo2, todo3 });
+      consumeWhitespace();
     }
 
-    if (pop(8) !== 'trailer\n') {
-      throw new Error('Trailer segment not found.');
-    }
-
+    expectLiteral('trailer');
+    expectNewline();
+    consumeWhitespace();
     this.trailerDict = parseDictionary();
-
-    if (pop(11) !== '\nstartxref\n') {
-      throw new Error('StartXRef segment not found.');
-    }
-
-    let startXref = '';
-    while (peek() !== '\n') {
-      startXref += pop();
-    }
-
-    // Pop the newline after start xref
-    shift();
-
-    this.startXref = startXref;
-
-    if (pop(5) !== '%%EOF') {
-      throw new Error('EOF segment not found.');
-    }
+    expectNewline();
+    expectLiteral('startxref');
+    expectNewline();
+    this.startXref = consumeMatch(/\d/);
+    expectNewline();
+    expectLiteral('%%EOF');
+    consumeWhitespace();
 
     if (cursor !== arrayBuffer.byteLength) {
       throw new Error('Found garbage at the end of the PDF.');
