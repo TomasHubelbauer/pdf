@@ -181,9 +181,10 @@ window.addEventListener('load', async () => {
 
   const xrefs = [];
   let match;
-  while (match = /^(?<todo1>\d{10}) (?<todo2>\d{5}) (?<todo3>[fn]) \n$/g.exec(peek(20))) {
+  // TODO: Use named groups when supported by Firefox
+  while (match = /^(\d{10}) (\d{5}) ([fn]) \n$/g.exec(peek(20))) {
     shift(20);
-    const { todo1, todo2, todo3 } = match.groups;
+    const [_, todo1, todo2, todo3] = match;
 
     // TODO: Parse the right fields for the xrefs
     xrefs.push({ todo1, todo2, todo3 });
