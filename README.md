@@ -13,7 +13,9 @@ Generate `demo.pdf` by running `chrome --headless --print-to-pdf="demo.pdf" demo
 
 ## To-Do
 
-### Parse the ops and args streams from the PDF
+### Find entry object and parse the ops and args from the text stream
+
+https://skia.org/dev/design/pdftheory
 
 https://en.wikipedia.org/wiki/PDF#File_structure
 
@@ -30,3 +32,18 @@ can be used to visualize the internal structure and cross-reference it with my c
 ### Rewrite in Node / complement by a Node version later on
 
 For now using the browser for `ArrayBuffer` and `DataView`.
+
+### Figure out parsing pages and their objects
+
+https://wiki.tcl-lang.org/page/Parsing+PDF might have info on this.
+
+### Improve parsing values
+
+https://skia.org/dev/design/pdftheory
+
+Be stricter about allowed value formats.
+
+### Fix XRef table second number to be count and not generation
+
+Ensure the number of entries is equal to the count by using a for loop and then
+expecting the trailer.
