@@ -47,3 +47,9 @@ Be stricter about allowed value formats.
 
 Ensure the number of entries is equal to the count by using a for loop and then
 expecting the trailer.
+
+### Parse dictionaries where keys are immediately followed by values
+
+For this, a proper formatting of values needs to be implemented first, so that
+things like names and strings do not get interrupted by otherwise significant
+characters and the slash can be used as a stop character when parsing the value.
