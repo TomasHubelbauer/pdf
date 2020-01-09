@@ -139,6 +139,8 @@ window.addEventListener('load', () => {
               const height = Number(object.content['Height']);
               if (width * height * 3 === uint8Array.byteLength) {
                 const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
                 const context = canvas.getContext('2d');
                 for (let x = 0; x < width; x++) {
                   for (let y = 0; y < height; y++) {
