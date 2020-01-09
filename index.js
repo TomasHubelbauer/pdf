@@ -20,37 +20,41 @@ window.addEventListener('load', () => {
           const subtype = object.content['Subtype'].slice(1);
           switch (subtype) {
             case 'Image': {
+              const dimensions = `${object.content['Width']}x${object.content['Height']}`;
               switch (object.content['Filter']) {
                 case '/FlateDecode': {
-                  objectOption.textContent = `${object.number} (${object.content['Width']}x${object.content['Height']} PNG stream)`;
+                  objectOption.textContent = `${object.number} (${dimensions} PNG)`;
                   break;
                 }
                 case '/DCTDecode': {
-                  objectOption.textContent = `${object.number} (${object.content['Width']}x${object.content['Height']} JPG stream)`;
+                  objectOption.textContent = `${object.number} (${dimensions} JPG)`;
                   break;
                 }
                 default: {
-                  objectOption.textContent = `${object.number} (image stream)`;
+                  objectOption.textContent = `${object.number} (${dimensions} image)`;
                 }
               }
 
               break;
             }
             case 'XML': {
-              objectOption.textContent = `${object.number} (XML stream)`;
+              objectOption.textContent = `${object.number} (XML)`;
             }
             case 'Form': {
-              objectOption.textContent = `${object.number} (form stream)`;
+              objectOption.textContent = `${object.number} (form)`;
               break;
             }
             default: {
-              objectOption.textContent = `${object.number} (binary stream)`;
+              objectOption.textContent = `${object.number} (stream)`;
             }
           }
         }
         else {
           objectOption.textContent = object.number + ' (stream)';
         }
+      }
+      else if (object.content['Type'] === '/Font') {
+        objectOption.textContent = object.number + ' (font)';
       }
       else {
         objectOption.textContent = object.number;
