@@ -15,7 +15,47 @@ window.addEventListener('load', () => {
     for (const object of pdf.objects) {
       const objectOption = document.createElement('option');
       objectOption.value = object.number;
-      objectOption.textContent = object.stream ? `${object.number} (has ${object.content['Filter'] || 'unknown'} ${object.content['Subtype'] || 'binary'} stream)` : object.number;
+      if (object.stream) {
+        if (object.content['Subtype']) {
+          const subtype = object.content['Subtype'].slice(1);
+          switch (subtype) {
+            case 'Image': {
+              switch (object.content['Filter']) {
+                case '/FlateDecode': {
+                  objectOption.textContent = `${object.number} (${object.content['Width']}x${object.content['Height']} PNG stream)`;
+                  break;
+                }
+                case '/DCTDecode': {
+                  objectOption.textContent = `${object.number} (${object.content['Width']}x${object.content['Height']} JPG stream)`;
+                  break;
+                }
+                default: {
+                  objectOption.textContent = `${object.number} (image stream)`;
+                }
+              }
+
+              break;
+            }
+            case 'XML': {
+              objectOption.textContent = `${object.number} (XML stream)`;
+            }
+            case 'Form': {
+              objectOption.textContent = `${object.number} (form stream)`;
+              break;
+            }
+            default: {
+              objectOption.textContent = `${object.number} (binary stream)`;
+            }
+          }
+        }
+        else {
+          objectOption.textContent = object.number + ' (stream)';
+        }
+      }
+      else {
+        objectOption.textContent = object.number;
+      }
+
       objectSelect.append(objectOption);
     }
 
@@ -32,38 +72,72 @@ window.addEventListener('load', () => {
 
     objectSelect.addEventListener('change', () => {
       const object = pdf.objects.find(o => o.number === objectSelect.value);
-      objectPre.textContent = JSON.stringify(object, null, 2);
-      if (typeof object.content === 'object' && object.stream) {
-        streamPre.textContent = new Uint8Array(object.stream.data.slice(0, 10)).toLocaleString() + '...';
-        if (object.content['Filter'] === '/FlateDecode' && object.content['Subtype'] === '/Image') {
-          const width = Number(object.content['Width']);
-          const height = Number(object.content['Height']);
-          const uint8Array = UZIP.inflate(new Uint8Array(object.stream.data));
-          if (width * height * 3 === uint8Array.byteLength) {
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-            for (let x = 0; x < width; x++) {
-              for (let y = 0; y < height; y++) {
-                const offset = y * width * 3 + x * 3;
-                const r = uint8Array[offset];
-                const g = uint8Array[offset + 1];
-                const b = uint8Array[offset + 2];
-                context.fillStyle = `rgb(${r}, ${g}, ${b})`;
-                context.fillRect(x, y, 1, 1);
-              }
-            }
+      const { stream, ...rest } = object;
+      objectPre.textContent = JSON.stringify(rest, null, 2);
+      streamPre.textContent = '';
+      if (renderImg.src && renderImg.src.startsWith('blob:')) {
+        URL.revokeObjectURL(renderImg.src);
+      }
 
-            renderImg.title = '';
-            renderImg.src = canvas.toDataURL();
-          }
-          else {
-            renderImg.title = 'Stream does not appear to be a raw RGB array.';
-            renderImg.src = '';
+      if (typeof object.content === 'object' && object.stream) {
+        renderImg.className = 'hidden';
+        // TODO: Check for ColorSpace=DeviceRGB format instead of assuming it
+        // TODO: Handle ColorSpace=DeviceGray in the PNG case
+        // TODO: Figure out how to handle DeviceGray and DeviceCMYK in the JPG case
+        if (object.content['Subtype'] === '/Image') {
+          switch (object.content['Filter']) {
+            case '/FlateDecode': {
+              /** @type {Uint8Array} */
+              const uint8Array = UZIP.inflate(new Uint8Array(object.stream.data));
+              const width = Number(object.content['Width']);
+              const height = Number(object.content['Height']);
+              if (width * height * 3 === uint8Array.byteLength) {
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                for (let x = 0; x < width; x++) {
+                  for (let y = 0; y < height; y++) {
+                    const offset = y * width * 3 + x * 3;
+                    const r = uint8Array[offset];
+                    const g = uint8Array[offset + 1];
+                    const b = uint8Array[offset + 2];
+                    context.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                    context.fillRect(x, y, 1, 1);
+                  }
+                }
+
+                renderImg.className = '';
+                renderImg.src = canvas.toDataURL();
+              }
+              else {
+                throw new Error('Invalid RGB array length');
+              }
+
+              break;
+            }
+            case '/DCTDecode': {
+              const blob = new Blob([object.stream.data], { type: 'image/jpg' });
+              renderImg.className = '';
+              renderImg.src = URL.createObjectURL(blob);
+              break;
+            }
+            default: {
+              streamPre.textContent += '\n' + new TextDecoder().decode(object.stream.data.slice(0, 1000)) + '…';
+            }
           }
         }
-      }
-      else {
-        streamPre.textContent = '';
+        else {
+          switch (object.content['Filter']) {
+            case '/FlateDecode': {
+              /** @type {Uint8Array} */
+              const uint8Array = UZIP.inflate(new Uint8Array(object.stream.data));
+              streamPre.textContent += '\n' + new TextDecoder().decode(uint8Array.slice(0, 1000)) + '…';
+              break;
+            }
+            default: {
+              streamPre.textContent += '\n' + new TextDecoder().decode(object.stream.data.slice(0, 1000)) + '…';
+            }
+          }
+        }
       }
     });
   }
