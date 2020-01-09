@@ -206,6 +206,7 @@ window.addEventListener('load', () => {
     }
     catch (error) {
       alert(error);
+      throw error;
     }
   }
 
@@ -266,34 +267,6 @@ class Pdf {
       return textDecoder.decode(arrayBuffer.slice(cursor, cursor + byteCount));
     }
 
-    const header = pop(7);
-    if (header !== '%PDF-1.') {
-      throw new Error('The file header is not a valid PDF header.');
-    }
-
-    const version = pop();
-    if (version <= '0' || version >= '7') {
-      throw new Error(`The PDF is version ${version}, only 7 is supported at the moment.`);
-    }
-
-    if (peek() === '\n' || peek() == '\r') {
-      shift();
-    }
-    else {
-      throw new Error('The header does not end with a newline.');
-    }
-
-    this.version = '1.' + version;
-
-    // Read the recommended comment marking the file as binary if present
-    if (peek() === '%') {
-      let newline;
-      do {
-        // Ignore the comment bytes
-      }
-      while ((newline = peek(), pop(), newline !== '\r' && newline !== '\n'));
-    }
-
     function consumeWhitespace() {
       let consumed = '';
       let peeked = '';
@@ -329,7 +302,7 @@ class Pdf {
         return;
       }
 
-      throw new Error(`Expected newline not found! '${peeked}'`);
+      throw new Error('Expected newline not found!');
     }
 
     function consumeMatch(regex) {
@@ -392,6 +365,7 @@ class Pdf {
       return value;
     }
 
+    // TODO: Use this recursively to parse nested arrays
     function parseArray() {
       expectLiteral('[');
       let depth = 1;
@@ -440,6 +414,28 @@ class Pdf {
       return dict;
     }
 
+    const header = pop(7);
+    if (header !== '%PDF-1.') {
+      throw new Error('The file header is not a valid PDF header.');
+    }
+
+    const version = pop();
+    if (version <= '0' || version >= '7') {
+      throw new Error(`The PDF is version ${version}, only 7 is supported at the moment.`);
+    }
+
+    expectNewline();
+
+    this.version = '1.' + version;
+
+    // Read the recommended comment marking the file as binary if present
+    if (peek() === '%') {
+      // Ignore the actual contents of the comment
+      consumeMatch(/[^\r\n]/);
+      expectNewline();
+      consumeWhitespace();
+    }
+
     this.objects = [];
     while (peek(4) !== 'xref') {
       const object = {};
@@ -468,13 +464,14 @@ class Pdf {
         object.stream.data = arrayBuffer.slice(cursor, cursor + length);
 
         shift(length);
-        expectNewline();
+        consumeWhitespace();
         expectLiteral('endstream');
         expectNewline();
       }
 
       expectLiteral('endobj');
       expectNewline();
+      consumeWhitespace();
 
       this.objects.push(object);
     }
@@ -482,16 +479,19 @@ class Pdf {
     expectLiteral('xref');
     expectNewline();
     this.xrefNumber = consumePrior(' ');
-    this.xrefGeneration = consumeMatch(/\d/);
+    this.xrefCount = consumeMatch(/\d/);
     expectNewline();
 
     this.xrefs = [];
-    let match;
-    // TODO: Use named groups when supported by Firefox
-    while (match = /^(\d{10}) (\d{5}) ([fn])$/g.exec(peek(18))) {
+    for (let index = 0; index < this.xrefCount; index++) {
+      // TODO: Use named groups when supported by Firefox
+      const match = /^(\d{10}) (\d{5}) ([fn])$/g.exec(peek(18));
+      if (match === null) {
+        throw new Error('Expected an xref, but there was none.');
+      }
+
       shift(20);
       const [_, todo1, todo2, todo3] = match;
-
       // TODO: Parse the right fields for the xrefs
       this.xrefs.push({ todo1, todo2, todo3 });
       consumeWhitespace();
@@ -502,6 +502,7 @@ class Pdf {
     consumeWhitespace();
     this.trailerDict = parseDictionary();
     expectNewline();
+    consumeWhitespace();
     expectLiteral('startxref');
     expectNewline();
     this.startXref = consumeMatch(/\d/);
