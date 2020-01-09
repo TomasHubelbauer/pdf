@@ -5,9 +5,16 @@ window.addEventListener('load', () => {
   const contentDiv = document.getElementById('contentDiv');
 
   function renderPdf(/** @type {Pdf} */ pdf) {
-    console.dir(pdf);
-
     contentDiv.innerHTML = '';
+
+    const filterInput = document.createElement('input');
+    filterInput.placeholder = 'Filter, e.g.: "rgb", "xml", "font", …';
+    contentDiv.append(filterInput, document.createElement('br'));
+
+    const filterSelect = document.createElement('select');
+    filterSelect.className = 'hidden';
+    filterSelect.size = 10;
+    contentDiv.append(filterSelect);
 
     const objectSelect = document.createElement('select');
     objectSelect.size = 10;
@@ -20,7 +27,23 @@ window.addEventListener('load', () => {
           const subtype = object.content['Subtype'].slice(1);
           switch (subtype) {
             case 'Image': {
-              const dimensions = `${object.content['Width']}x${object.content['Height']}`;
+              let color;
+              switch (object.content['ColorSpace']) {
+                case '/DeviceRGB': {
+                  color = 'RGB';
+                  break;
+                }
+                case '/DeviceCMYK': {
+                  color = 'CMYK';
+                  break;
+                }
+                case '/DeviceGray': {
+                  color = 'grayscale';
+                  break;
+                }
+              }
+
+              const dimensions = `${object.content['Width']}x${object.content['Height']}${color ? ' ' + color : ''}`;
               switch (object.content['Filter']) {
                 case '/FlateDecode': {
                   objectOption.textContent = `${object.number} (${dimensions} PNG)`;
@@ -74,8 +97,27 @@ window.addEventListener('load', () => {
     const renderImg = document.createElement('img');
     contentDiv.append(renderImg);
 
-    objectSelect.addEventListener('change', () => {
-      const object = pdf.objects.find(o => o.number === objectSelect.value);
+    filterInput.addEventListener('input', () => {
+      if (filterInput.value) {
+        objectSelect.className = 'hidden';
+        filterSelect.innerHTML = '';
+        for (const option of objectSelect.options) {
+          if (!option.textContent.toUpperCase().includes(filterInput.value.toUpperCase())) {
+            continue;
+          }
+
+          filterSelect.append(option.cloneNode(true));
+        }
+
+        filterSelect.className = '';
+      }
+      else {
+        objectSelect.className = '';
+        filterSelect.className = 'hidden';
+      }
+    });
+
+    function renderObject(object) {
       const { stream, ...rest } = object;
       objectPre.textContent = JSON.stringify(rest, null, 2);
       streamPre.textContent = '';
@@ -143,7 +185,26 @@ window.addEventListener('load', () => {
           }
         }
       }
+    }
+
+    objectSelect.addEventListener('change', () => {
+      const object = pdf.objects.find(o => o.number === objectSelect.value);
+      renderObject(object);
     });
+
+    filterSelect.addEventListener('change', () => {
+      const object = pdf.objects.find(o => o.number === filterSelect.value);
+      renderObject(object);
+    });
+  }
+
+  function loadPdf(/** @type {ArrayBuffer} */ arrayBuffer, /** @type{string} */ name) {
+    try {
+      renderPdf(new Pdf(arrayBuffer, name));
+    }
+    catch (error) {
+      alert(error);
+    }
   }
 
   uploadButton.addEventListener('click', () => {
@@ -163,14 +224,14 @@ window.addEventListener('load', () => {
     const file = event.currentTarget.files[0];
     const fileReader = new FileReader();
     fileReader.readAsArrayBuffer(file);
-    fileReader.addEventListener('load', () => renderPdf(new Pdf(fileReader.result, file.name)));
+    fileReader.addEventListener('load', () => loadPdf(fileReader.result, file.name));
     fileReader.addEventListener('error', () => alert('Failed to load the file.'));
   });
 
   demoButton.addEventListener('click', async () => {
     const response = await fetch('demo.pdf');
     const arrayBuffer = await response.arrayBuffer();
-    renderPdf(new Pdf(arrayBuffer));
+    loadPdf(arrayBuffer);
   });
 
   // Load a file if it is prefilled by the browser from the last session
