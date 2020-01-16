@@ -53,3 +53,5 @@ expecting the trailer.
 For this, a proper formatting of values needs to be implemented first, so that
 things like names and strings do not get interrupted by otherwise significant
 characters and the slash can be used as a stop character when parsing the value.
+
+### Parse arrays recursively or replace with new value parsing completely
